@@ -1,13 +1,21 @@
 import os
 import openai
 import subprocess
+from helpers.openai import Model
+from pathlib import Path
 
+import dotenv
+dotenv.load_dotenv()
+
+assert os.getenv(
+    "OPENAI_API_KEY") is not None, "Please set OPENAI_API_KEY in .env file"
 
 # Please replace `your-openai-api-key` with your own OpenAI API key
-openai.api_key = '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'
-engine = "gpt-4"
-max_token = 500
+openai.api_key = os.getenv("OPENAI_API_KEY")
+engine = Model.GPT_4_32K
+max_tokens = 2048
 feedback = ""
+
 
 def create_openai_chat_response(prompt: str) -> str:
     """Create a chat response using OpenAI API."""
@@ -16,11 +24,14 @@ def create_openai_chat_response(prompt: str) -> str:
         prompt = f"This is what should be most important. Modify the code to follow the feedback as given: {feedback} \n{prompt}"
     response = openai.ChatCompletion.create(
         model=engine,
-        messages=[{"role":"user","content":prompt}],
+        messages=[{"role": "user", "content": prompt}],
         temperature=0.5,
-        max_tokens=max_token
+        max_tokens=max_tokens,
     )
-    return response["choices"][0]["message"]["content"].replace("```python","").replace("```","")
+    completion = response["choices"][0]["message"]["content"]  # type: ignore
+    filtered_completion = completion.replace(
+        "```python", "").replace("```", "")
+    return filtered_completion
 
 
 def generate_code_from_prompt(prompt: str) -> str:
@@ -42,7 +53,7 @@ def generate_file_name_from_prompt(prompt: str) -> str:
     return create_openai_chat_response(prompt)
 
 
-def write_code_to_file(code: str, filename: str):
+def write_code_to_file(code: str, filename: str | Path):
     """Write the given code to a file with the given filename."""
     with open(filename, 'w') as f:
         f.write(code)
@@ -50,9 +61,15 @@ def write_code_to_file(code: str, filename: str):
 
 def run_code(filename: str) -> str:
     """Run a Python code file and return the error output."""
-    process = subprocess.Popen(['python', filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(
+        ['python', filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     _, stderr = process.communicate()
     return stderr.decode()
+
+
+save_dir = Path(__file__).parent / "generated"
+
+print(save_dir)
 
 
 def code_loop(new_prompt: str = "", og_prompt: str = "", error: str = "", loop: int = 0, title: str = ""):
@@ -67,19 +84,21 @@ def code_loop(new_prompt: str = "", og_prompt: str = "", error: str = "", loop: 
         elif inp.lower() == "n":
             global feedback
 
-            feedback = input("Please enter the feedback you would like to give to the AI.\nFeedback: ")
+            feedback = input(
+                "Please enter the feedback you would like to give to the AI.\nFeedback: ")
             error = "Human feedback given"
             code_loop(new_prompt, og_prompt, error, loop, title)
     elif new_prompt == "":
         og_prompt = input("Please enter the prompt for the task: ")
         # og_prompt = "Create a gui that will display a button that will display a message when clicked"
-        title = generate_file_name_from_prompt(f"Create a short python file name with the file extension for this task: {og_prompt}")
+        title = generate_file_name_from_prompt(
+            f"Create a short python file name with the file extension for this task: {og_prompt}")
         code = generate_code_from_prompt(og_prompt)
         test_prompt = f"The prompt: {og_prompt} \nThe code: {code}"
         test_cases = generate_test_cases_from_prompt(test_prompt)
 
         # Write both the code and test cases to the same file
-        write_code_to_file(code, title)
+        write_code_to_file(code, save_dir/title)
         write_code_to_file(test_cases, 'test.py')
         test_str = f"{code} \n{test_cases}"
         write_code_to_file(test_str, 'checker.py')
